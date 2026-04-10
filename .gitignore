@@ -13,6 +13,7 @@ node_modules/
 .idea/
 *.swp
 *.swo
+.ref/
 
 # OS
 .DS_Store
