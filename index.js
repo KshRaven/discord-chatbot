@@ -8,12 +8,12 @@ const axios = require('axios');
 // ============================================
 const CONFIG = {
   RESPONSE_CHUNK_SIZE: 1900,
-  SESSION_TIMEOUT: 3600000, // 1 hour
-  CLEANUP_INTERVAL: 300000, // 5 minutes
+  SESSION_TIMEOUT: 60 * 60 * 1000, // 1 hour
+  CLEANUP_INTERVAL: 5 * 60 * 1000, // 5 minutes
   THREAD_AUTO_ARCHIVE: 60,
   IMAGE_SIZE: 1024,
   RATE_LIMIT_THRESHOLD: 50, // requests per hour per user
-  RATE_LIMIT_WINDOW: 3600000, // 1 hour
+  RATE_LIMIT_WINDOW: 3600 * 1000, // 1 hour
   MAX_IMAGE_SIZE: 20 * 1024 * 1024, // 20MB
   // Retry config for transient errors
   MAX_RETRIES: 3,
@@ -21,7 +21,7 @@ const CONFIG = {
   MAX_RETRY_DELAY: 10000, // 10 seconds
   // Thread management
   MAX_ACTIVE_THREADS_PER_USER: 5,
-  THREAD_LIFETIME: 1 * 60 * 1000, // 12 hours
+  THREAD_LIFETIME: 60 * 60 * 1000, // 12 hours
 };
 
 // ============================================
@@ -259,17 +259,21 @@ async function getOrCreateUserThread(message, isBotMentioned = false) {
   // Clean up expired threads
   const threadsToKeep = [];
   for (const t of userThreadList) {
-    const age = now - t.createdAt;
+    const age = now - t.lastActivity;
     if (age > CONFIG.THREAD_LIFETIME) {
       Logger.log(`Removing expired thread ${t.threadId} for user ${userId}`);
       chatSessions.delete(t.sessionId); // Clean up session too
       
-      // Try to send expiration message
+      // Try to send expiration message and archive thread
       try {
         const channel = await message.client.channels.fetch(t.threadId);
         await channel.send("⏰ **Thread Expired**: This conversation thread has been automatically closed due to inactivity. Start a new conversation to continue.");
+        // Archive and lock the thread to remove it from view and prevent further messages
+        await channel.setArchived(true);
+        await channel.setLocked(true);
+        Logger.debug(`Archived and locked expired thread ${t.threadId}`);
       } catch (err) {
-        Logger.debug(`Could not send expiration message to thread ${t.threadId}`);
+        Logger.debug(`Could not cleanup expired thread ${t.threadId}: ${err.message}`);
       }
     } else {
       threadsToKeep.push(t);
@@ -401,19 +405,23 @@ async function cleanupOldSessions() {
     const threadsToKeep = [];
     
     for (const thread of threadList) {
-      const age = now - thread.createdAt;
+      const age = now - thread.lastActivity;
       if (age > CONFIG.THREAD_LIFETIME) {
         Logger.debug(`Cleaning up expired thread ${thread.threadId} for user ${userId}`);
         chatSessions.delete(thread.sessionId);
         cleanedSessions++;
         cleanedThreads++;
         
-        // Try to send expiration message
+        // Try to send expiration message and archive thread
         try {
           const channel = await client.channels.fetch(thread.threadId);
           await channel.send("⏰ **Thread Expired**: This conversation thread has been automatically closed due to inactivity. Start a new conversation to continue.");
+          // Archive and lock the thread to remove it from view and prevent further messages
+          await channel.setArchived(true);
+          await channel.setLocked(true);
+          Logger.debug(`Archived and locked expired thread ${thread.threadId}`);
         } catch (err) {
-          Logger.debug(`Could not send expiration message to thread ${thread.threadId}`);
+          Logger.debug(`Could not cleanup expired thread ${thread.threadId}: ${err.message}`);
         }
       } else {
         threadsToKeep.push(thread);
